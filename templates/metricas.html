@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Métricas Pro | Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.1.0"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <h2>Dashboard de Rendimiento Inteligente</h2>
+        <a href="/" class="btn-metricas">← Volver al Kanban</a>
+    </nav>
+
+    <div class="metrics-grid">
+        <div class="metric-card" style="border-bottom-color: #9b59b6;">
+            <h3>Avg Lead Time</h3>
+            <p class="value">{{ avg_lead | default(0) }} <span class="unit">días</span></p>
+            <small>Desde creación hasta entrega final</small>
+        </div>
+        <div class="metric-card" style="border-bottom-color: #2ecc71;">
+            <h3>Avg Cycle Time</h3>
+            <p class="value">{{ avg_cycle | default(0) }} <span class="unit">días</span></p>
+            <small>Tiempo real de desarrollo activo</small>
+        </div>
+    </div>
+
+    <div class="charts-container">
+        <div class="chart-box">
+            <h4>Evolución Lead Time (Atención al Cliente)</h4>
+            <p class="chart-hint">La línea punteada es tu promedio. ¡Mantente abajo! ↓</p>
+            <canvas id="leadTimeChart"></canvas>
+        </div>
+        
+        <div class="chart-box">
+            <h4>Velocidad de Desarrollo (Cycle Time)</h4>
+            <p class="chart-hint">Rojo = Bloqueo | Amarillo = Riesgo | Verde = Fluidez</p>
+            <canvas id="cycleTimeChart"></canvas>
+        </div>
+
+        <div class="chart-box">
+            <h4>Esfuerzo por Estado (Story Points)</h4>
+            <canvas id="puntosChart"></canvas>
+        </div>
+
+        <div class="chart-box">
+            <h4>Salud del Código (Code Churn)</h4>
+            <canvas id="churnChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        Chart.defaults.color = '#a0aabf';
+        Chart.defaults.font.family = "'Segoe UI', sans-serif";
+
+        const nombresTareas = {{ task_names | tojson | safe }};
+        const leadTimes = {{ lead_times | tojson | safe }};
+        const cycleTimes = {{ cycle_times | tojson | safe }};
+        const avgLead = {{ avg_lead | default(0) }};
+
+        // 1. LEAD TIME CHART
+        new Chart(document.getElementById('leadTimeChart'), {
+            type: 'line',
+            data: {
+                labels: nombresTareas,
+                datasets: [
+                    {
+                        label: 'Días de esta tarea',
+                        data: leadTimes,
+                        borderColor: '#9b59b6',
+                        backgroundColor: 'rgba(155, 89, 182, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 5
+                    },
+                    {
+                        label: 'Promedio General',
+                        data: Array(nombresTareas.length).fill(avgLead),
+                        borderColor: 'rgba(255, 255, 255, 0.4)',
+                        borderDash: [8, 4],
+                        pointRadius: 0,
+                        fill: false
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true, grid: { color: '#333' } } }
+            }
+        });
+
+        // 2. CYCLE TIME CHART (Semáforo Dinámico)
+        new Chart(document.getElementById('cycleTimeChart'), {
+            type: 'line',
+            data: {
+                labels: nombresTareas,
+                datasets: [{
+                    label: 'Días en desarrollo',
+                    data: cycleTimes,
+                    fill: true,
+                    tension: 0.4,
+                    segment: {
+                        borderColor: ctx => ctx.p1.raw > 5 ? '#e74c3c' : (ctx.p1.raw > 3 ? '#f1c40f' : '#2ecc71'),
+                        backgroundColor: ctx => ctx.p1.raw > 5 ? 'rgba(231, 76, 60, 0.2)' : (ctx.p1.raw > 3 ? 'rgba(241, 196, 15, 0.1)' : 'rgba(46, 204, 113, 0.1)')
+                    },
+                    pointBackgroundColor: '#fff',
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    annotation: {
+                        annotations: {
+                            line1: {
+                                type: 'line',
+                                yMin: 3,
+                                yMax: 3,
+                                borderColor: 'rgba(46, 204, 113, 0.5)',
+                                borderDash: [5, 5],
+                                label: { content: 'Zona Óptima', display: true, position: 'end', color: '#2ecc71', font: {size: 10} }
+                            }
+                        }
+                    }
+                },
+                scales: { y: { beginAtZero: true, grid: { color: '#333' } } }
+            }
+        });
+
+        // 3. STORY POINTS CHART
+        new Chart(document.getElementById('puntosChart'), {
+            type: 'bar',
+            data: {
+                labels: ['Backlog', 'Doing', 'Done'],
+                datasets: [{
+                    label: 'Puntos Totales',
+                    data: [
+                        {{ stats_puntos.get('Backlog', 0) if stats_puntos else 0 }},
+                        {{ stats_puntos.get('Doing', 0) if stats_puntos else 0 }},
+                        {{ stats_puntos.get('Done', 0) if stats_puntos else 0 }}
+                    ],
+                    backgroundColor: ['#e74c3c', '#f1c40f', '#2ecc71'],
+                    borderRadius: 8
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+
+        // 4. CODE CHURN CHART
+        new Chart(document.getElementById('churnChart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Líneas Agregadas', 'Líneas Eliminadas'],
+                datasets: [{
+                    data: [{{ total_agregadas | default(0) }}, {{ total_eliminadas | default(0) }}],
+                    backgroundColor: ['#3498db', '#e74c3c'],
+                    hoverOffset: 10,
+                    borderWidth: 0
+                }]
+            },
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' } }
+            }
+        });
+    </script>
+
+    <style>
+        .chart-hint { font-size: 0.75rem; color: #636e72; text-align: center; margin-bottom: 10px; font-style: italic; }
+        .unit { font-size: 0.4em; color: #636e72; vertical-align: middle; }
+        /* Ajuste para que las 2 tarjetas ocupen bien el espacio */
+        .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+        @media (max-width: 600px) { .metrics-grid { grid-template-columns: 1fr; } }
+    </style>
+</body>
+</html>

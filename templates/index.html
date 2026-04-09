@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Kanban Métricas Ágiles</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <h2>Kanban de Desarrollo</h2>
+        <a href="/metricas" class="btn-metricas">Ver Dashboard de Métricas →</a>
+    </nav>
+
+    <div id="toast" class="toast">Notificación</div>
+
+    <div class="add-task-container">
+        <form action="/add_task" method="POST" class="add-task-form">
+            <div class="inputs-principales">
+                <input type="text" name="titulo" placeholder="Ej. Integrar pasarela de pago..." required autocomplete="off">
+                <input type="number" name="story_points" placeholder="Story Points (Pts)" min="1" max="21" required style="width: 160px;">
+            </div>
+            <div class="inputs-principales">
+                <input type="number" name="lineas_agregadas" placeholder="+ Líneas agregadas" min="0">
+                <input type="number" name="lineas_eliminadas" placeholder="- Líneas eliminadas" min="0">
+            </div>
+            <div class="inputs-fechas">
+                <label>Creado: <input type="date" name="fecha_creacion" required></label>
+                <label>Inició: <input type="date" name="fecha_inicio"></label>
+                <label>Terminó: <input type="date" name="fecha_entrega"></label>
+            </div>
+            <button type="submit">+ Agregar Tarea (al Backlog)</button>
+        </form>
+    </div>
+
+    <div class="search-container">
+        <input type="text" id="buscador" class="search-input" placeholder="🔍 Buscar tarea por título..." onkeyup="filtrarTareas()">
+    </div>
+
+    <div class="kanban-container">
+        {% macro render_cards(tareas) %}
+            {% for tarea in tareas %}
+            <div class="card" data-id="{{ tarea._id }}">
+                <div class="card-header-flex">
+                    <div class="card-title">{{ tarea.titulo }}</div>
+                    <div class="card-actions">
+                        <button class="btn-edit" 
+                            data-id="{{ tarea._id }}" data-titulo="{{ tarea.titulo }}"
+                            data-sp="{{ tarea.story_points }}" data-add="{{ tarea.churn.agregadas if tarea.churn else 0 }}"
+                            data-del="{{ tarea.churn.eliminadas if tarea.churn else 0 }}"
+                            data-crea="{{ tarea.fechas.creacion.strftime('%Y-%m-%d') if tarea.fechas and 'creacion' in tarea.fechas else '' }}"
+                            data-ini="{{ tarea.fechas.inicio.strftime('%Y-%m-%d') if tarea.fechas and 'inicio' in tarea.fechas else '' }}"
+                            data-ent="{{ tarea.fechas.entrega.strftime('%Y-%m-%d') if tarea.fechas and 'entrega' in tarea.fechas else '' }}"
+                            onclick="abrirModal(this)">✏️</button>
+                        <button class="btn-delete" onclick="eliminarTarea('{{ tarea._id }}')">🗑️</button>
+                    </div>
+                </div>
+                <div class="card-points">Story Points: <span>{{ tarea.story_points }}</span></div>
+            </div>
+            {% endfor %}
+        {% endmacro %}
+
+        <div class="column">
+            <div class="column-header backlog-header">Backlog</div>
+            <div id="Backlog" class="list">{{ render_cards(backlog) }}</div>
+        </div>
+        <div class="column">
+            <div class="column-header doing-header">Doing (WIP Max: 3)</div>
+            <div id="Doing" class="list">{{ render_cards(doing) }}</div>
+        </div>
+        <div class="column">
+            <div class="column-header done-header">Done</div>
+            <div id="Done" class="list">{{ render_cards(done) }}</div>
+        </div>
+    </div>
+
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="cerrarModal()">&times;</span>
+            <h3 style="margin-bottom: 15px; color: #f39c12;">Editar Tarea</h3>
+            <form id="editForm" method="POST" class="add-task-form" style="box-shadow: none; border-top: none; padding: 0;">
+                <div class="inputs-principales">
+                    <input type="text" id="edit_titulo" name="titulo" required autocomplete="off">
+                    <input type="number" id="edit_sp" name="story_points" min="1" max="21" required style="width: 100px;">
+                </div>
+                <div class="inputs-principales">
+                    <input type="number" id="edit_add" name="lineas_agregadas" placeholder="+ Agregadas" min="0">
+                    <input type="number" id="edit_del" name="lineas_eliminadas" placeholder="- Eliminadas" min="0">
+                </div>
+                <div class="inputs-fechas" style="flex-wrap: wrap;">
+                    <label>Creado: <input type="date" id="edit_crea" name="fecha_creacion" required></label>
+                    <label>Inició: <input type="date" id="edit_ini" name="fecha_inicio"></label>
+                    <label>Terminó: <input type="date" id="edit_ent" name="fecha_entrega"></label>
+                </div>
+                <button type="submit" style="background: #f39c12; margin-top: 15px;">💾 Guardar Cambios</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Fechas máximas
+        const hoy = new Date().toISOString().split('T')[0];
+        document.querySelectorAll('input[type="date"]').forEach(input => input.setAttribute('max', hoy));
+
+        // Toast de Notificaciones
+        function mostrarToast(mensaje, color = "#2ecc71") {
+            const toast = document.getElementById("toast");
+            toast.innerText = mensaje;
+            toast.style.borderLeftColor = color;
+            toast.className = "toast show";
+            setTimeout(() => { toast.className = toast.className.replace("show", ""); }, 3000);
+        }
+
+        // Buscador Dinámico
+        function filtrarTareas() {
+            const texto = document.getElementById('buscador').value.toLowerCase();
+            document.querySelectorAll('.card').forEach(tarjeta => {
+                const titulo = tarjeta.querySelector('.card-title').innerText.toLowerCase();
+                tarjeta.style.display = titulo.includes(texto) ? "" : "none";
+            });
+        }
+
+        // Eliminar Tarea
+        function eliminarTarea(id) {
+            if(confirm("🚨 ¿Estás seguro de que quieres eliminar esta tarea permanentemente?")) {
+                fetch('/delete_task/' + id, { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    mostrarToast("🗑️ Tarea eliminada", "#e74c3c");
+                    setTimeout(() => location.reload(), 800);
+                });
+            }
+        }
+
+        // Kanban y WIP Limits
+        const columns = document.querySelectorAll('.list');
+        columns.forEach(col => {
+            new Sortable(col, {
+                group: 'kanban',
+                animation: 150,
+                ghostClass: 'ghost-card',
+                onMove: function (evt) {
+                    if (evt.to.id === 'Doing' && evt.from.id !== 'Doing') {
+                        const tareasEnDoing = evt.to.getElementsByClassName('card').length;
+                        if (tareasEnDoing >= 3) {
+                            mostrarToast("⚠️ Límite WIP alcanzado (Máx 3 tareas)", "#e67e22");
+                            return false;
+                        }
+                    }
+                },
+                onEnd: function (evt) {
+                    const tareaId = evt.item.getAttribute('data-id');
+                    const nuevoEstado = evt.to.id;
+                    const viejoEstado = evt.from.id;
+
+                    if (nuevoEstado !== viejoEstado) {
+                        fetch('/update_status', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: tareaId, nuevo_estado: nuevoEstado })
+                        })
+                        .then(response => response.json())
+                        .then(data => mostrarToast("✅ Tarea movida a " + nuevoEstado));
+                    }
+                }
+            });
+        });
+
+        // Lógica Modal Editar
+        const modal = document.getElementById("editModal");
+        function abrirModal(btn) {
+            document.getElementById("editForm").action = "/edit_task/" + btn.getAttribute("data-id");
+            document.getElementById("edit_titulo").value = btn.getAttribute("data-titulo");
+            document.getElementById("edit_sp").value = btn.getAttribute("data-sp");
+            document.getElementById("edit_add").value = btn.getAttribute("data-add");
+            document.getElementById("edit_del").value = btn.getAttribute("data-del");
+            document.getElementById("edit_crea").value = btn.getAttribute("data-crea");
+            document.getElementById("edit_ini").value = btn.getAttribute("data-ini");
+            document.getElementById("edit_ent").value = btn.getAttribute("data-ent");
+            modal.style.display = "block";
+        }
+        function cerrarModal() { modal.style.display = "none"; }
+        window.onclick = function(event) { if (event.target == modal) cerrarModal(); }
+    </script>
+</body>
+</html>
